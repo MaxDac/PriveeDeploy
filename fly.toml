@@ -9,6 +9,9 @@
 primary_region = 'ams'
 kill_signal = 'SIGTERM'
 
+[build]
+  # Builds the Dockerfile of the Privee checkout on Fly's remote builders.
+
 [deploy]
   # Runs database migrations before every release.
   release_command = '/app/bin/migrate'
@@ -22,14 +25,14 @@ kill_signal = 'SIGTERM'
 [http_service]
   internal_port = 8080
   force_https = true
-  # Privee keeps encrypted messages in memory on one machine until they are
-  # delivered, so it runs as a single, always-on machine. To save money you
-  # can let Fly stop it when idle (auto_stop_machines = 'stop' and
-  # min_machines_running = 0), but undelivered messages are then lost
-  # whenever the machine stops.
-  auto_stop_machines = 'off'
+  # Scale to zero: Fly stops the machine when idle and starts it on the next
+  # request, which keeps a small instance within the free allowance. Privee
+  # keeps undelivered encrypted messages in memory, so they are lost whenever
+  # the machine stops. For an always-on server set auto_stop_machines = 'off'
+  # and min_machines_running = 1.
+  auto_stop_machines = 'stop'
   auto_start_machines = true
-  min_machines_running = 1
+  min_machines_running = 0
   processes = ['app']
 
   [http_service.concurrency]
@@ -37,6 +40,7 @@ kill_signal = 'SIGTERM'
     hard_limit = 1000
     soft_limit = 1000
 
+# Privee must run on a single machine (chat storage is node-local).
 [[vm]]
   memory = '1gb'
   cpu_kind = 'shared'
