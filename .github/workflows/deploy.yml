@@ -1,9 +1,12 @@
 name: Deploy
 
 on:
-  push:
-    branches: [main]
   workflow_dispatch:
+    inputs:
+      ref:
+        description: Branch, tag or commit SHA of Privee to deploy
+        required: true
+        default: main
 
 permissions:
   contents: read
@@ -16,9 +19,6 @@ jobs:
   deploy:
     name: Deploy to Fly.io
     runs-on: ubuntu-24.04
-    # Skipped until the FLY_APP repository variable is set, so a freshly
-    # created repository does not fail on its first push.
-    if: vars.FLY_APP != ''
     environment:
       name: production
       url: https://${{ vars.PHX_HOST || format('{0}.fly.dev', vars.FLY_APP) }}
@@ -26,29 +26,62 @@ jobs:
       FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
       FLY_APP: ${{ vars.FLY_APP }}
       PHX_HOST: ${{ vars.PHX_HOST || format('{0}.fly.dev', vars.FLY_APP) }}
-      PRIVEE_IMAGE: ${{ vars.PRIVEE_IMAGE || 'ghcr.io/maxdac/privee:latest' }}
+      PRIVEE_REPO: ${{ vars.PRIVEE_REPO || 'MaxDac/Privee' }}
       PRIVEE_INSTANCE_NAME: ${{ vars.PRIVEE_INSTANCE_NAME }}
-      PRIVEE_SOURCE_URL: ${{ vars.PRIVEE_SOURCE_URL }}
+      PRIVEE_REF: ${{ inputs.ref }}
     steps:
-      - uses: actions/checkout@v7
-
       - name: Check configuration
         run: |
-          if [ -z "$FLY_API_TOKEN" ]; then
-            echo "::error::Set the FLY_API_TOKEN secret (fly tokens create deploy -a $FLY_APP)."
-            exit 1
+          missing=0
+          if [ -z "$FLY_APP" ]; then
+            echo "::error::Set the FLY_APP repository variable to your Fly.io app name."
+            missing=1
           fi
+          if [ -z "$FLY_API_TOKEN" ]; then
+            echo "::error::Set the FLY_API_TOKEN secret (fly tokens create deploy -a <app>)."
+            missing=1
+          fi
+          exit "$missing"
+
+      - name: Check out deploy configuration
+        uses: actions/checkout@v7
+        with:
+          path: deploy
+
+      - name: Check out Privee
+        uses: actions/checkout@v7
+        with:
+          repository: ${{ env.PRIVEE_REPO }}
+          ref: ${{ inputs.ref }}
+          path: privee
+
+      - name: Add fly.toml
+        run: cp deploy/fly.toml privee/fly.toml
 
       - uses: superfly/flyctl-actions/setup-flyctl@1.5
 
       - name: Deploy
+        working-directory: privee
         run: |
-          args=(--app "$FLY_APP" --image "$PRIVEE_IMAGE" --ha=false --env "PHX_HOST=$PHX_HOST")
+          sha=$(git rev-parse HEAD)
+          args=(
+            --app "$FLY_APP"
+            --remote-only
+            --ha=false
+            --env "PHX_HOST=$PHX_HOST"
+            --env "PRIVEE_SOURCE_URL=https://github.com/$PRIVEE_REPO/tree/$sha"
+          )
           if [ -n "$PRIVEE_INSTANCE_NAME" ]; then
             args+=(--env "PRIVEE_INSTANCE_NAME=$PRIVEE_INSTANCE_NAME")
           fi
-          if [ -n "$PRIVEE_SOURCE_URL" ]; then
-            args+=(--env "PRIVEE_SOURCE_URL=$PRIVEE_SOURCE_URL")
-          fi
-          echo "Deploying $PRIVEE_IMAGE to $FLY_APP ($PHX_HOST)"
+          echo "Deploying $PRIVEE_REPO@$sha to $FLY_APP ($PHX_HOST)"
           flyctl deploy "${args[@]}"
+          {
+            echo "### Deployed Privee"
+            echo
+            echo "| | |"
+            echo "| --- | --- |"
+            echo "| Source | [$PRIVEE_REPO@${sha:0:7}](https://github.com/$PRIVEE_REPO/commit/$sha) (\`$PRIVEE_REF\`) |"
+            echo "| Fly.io app | \`$FLY_APP\` |"
+            echo "| URL | https://$PHX_HOST |"
+          } >> "$GITHUB_STEP_SUMMARY"
