@@ -1,0 +1,50 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  actionlint:
+    name: Workflows (actionlint)
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Run actionlint
+        run: |
+          bash <(curl -fsSL https://raw.githubusercontent.com/rhysd/actionlint/v1.7.12/scripts/download-actionlint.bash) 1.7.12
+          ./actionlint -color
+
+  fly-config:
+    name: Fly config (fly.toml)
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Check fly.toml
+        shell: python3 {0}
+        run: |
+          import sys, tomllib
+
+          with open("fly.toml", "rb") as f:
+              config = tomllib.load(f)
+
+          errors = []
+          if "app" in config:
+              errors.append("remove `app`: the deploy workflow passes the FLY_APP variable")
+          if "PHX_HOST" in config.get("env", {}):
+              errors.append("remove env.PHX_HOST: set the PHX_HOST variable instead")
+          if config.get("deploy", {}).get("release_command") != "/app/bin/migrate":
+              errors.append("deploy.release_command must be '/app/bin/migrate' to run migrations")
+          if str(config.get("http_service", {}).get("internal_port")) != config.get("env", {}).get("PORT"):
+              errors.append("http_service.internal_port must match env.PORT")
+
+          for error in errors:
+              print(f"::error file=fly.toml::{error}")
+          sys.exit(1 if errors else 0)

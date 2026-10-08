@@ -1,0 +1,43 @@
+# Fly.io configuration of your Privee instance.
+# Reference: https://fly.io/docs/reference/configuration/
+#
+# The app name is not set here: the deploy workflow passes the FLY_APP
+# repository variable (`fly deploy --app <name>` when deploying by hand).
+# PHX_HOST is passed by the workflow too, defaulting to <FLY_APP>.fly.dev.
+
+# Closest region to your users: https://fly.io/docs/reference/regions/
+primary_region = 'ams'
+kill_signal = 'SIGTERM'
+
+[deploy]
+  # Runs database migrations before every release.
+  release_command = '/app/bin/migrate'
+
+[env]
+  PORT = '8080'
+  # Fly's X-Forwarded-For ends with "<client>, <app IP>": the client is the
+  # second address from the right.
+  PROXY_HOPS = '2'
+
+[http_service]
+  internal_port = 8080
+  force_https = true
+  # Privee keeps encrypted messages in memory on one machine until they are
+  # delivered, so it runs as a single, always-on machine. To save money you
+  # can let Fly stop it when idle (auto_stop_machines = 'stop' and
+  # min_machines_running = 0), but undelivered messages are then lost
+  # whenever the machine stops.
+  auto_stop_machines = 'off'
+  auto_start_machines = true
+  min_machines_running = 1
+  processes = ['app']
+
+  [http_service.concurrency]
+    type = 'connections'
+    hard_limit = 1000
+    soft_limit = 1000
+
+[[vm]]
+  memory = '1gb'
+  cpu_kind = 'shared'
+  cpus = 1
